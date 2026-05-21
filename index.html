@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>PilotPath — refdata load spike</title>
+<style>
+  :root { color-scheme: dark; }
+  html,body { margin:0; background:#0b1220; color:#e7ecf3;
+    font:15px/1.5 -apple-system,BlinkMacSystemFont,system-ui,sans-serif; }
+  .wrap { max-width:680px; margin:0 auto; padding:24px 18px; }
+  h1 { font-size:18px; margin:0 0 4px; }
+  .sub { color:#8da0bc; font-size:13px; margin-bottom:20px; }
+  .row { display:flex; justify-content:space-between; padding:11px 0;
+    border-bottom:1px solid rgba(231,236,243,.12); }
+  .row .k { color:#8da0bc; }
+  .row .v { font-variant-numeric:tabular-nums; font-weight:600; }
+  .v.ok { color:#7CFC9B; } .v.warn { color:#ffd166; } .v.bad { color:#ff7a59; }
+  #status { margin:18px 0; padding:12px 14px; border-radius:8px;
+    background:rgba(111,185,255,.12); }
+  #verdict { margin-top:18px; font-size:16px; font-weight:700; }
+  .ua { margin-top:24px; color:#5f7396; font-size:11px; word-break:break-all; }
+  button { margin-top:18px; background:#2a3a60; color:#e7ecf3; border:0;
+    padding:12px 18px; border-radius:8px; font-size:15px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>PilotPath — reference-data load test</h1>
+  <div class="sub">Measures fetch + JSON.parse of the full-world airport/navaid bundle on THIS device. No app, no map — just the data layer.</div>
+
+  <div id="status">Loading bundle…</div>
+
+  <div id="results" style="display:none">
+    <div class="row"><span class="k">Transfer size (over the wire)</span><span class="v" id="xfer">—</span></div>
+    <div class="row"><span class="k">Uncompressed size</span><span class="v" id="raw">—</span></div>
+    <div class="row"><span class="k">Download time</span><span class="v" id="dl">—</span></div>
+    <div class="row"><span class="k">JSON.parse time</span><span class="v" id="parse">—</span></div>
+    <div class="row"><span class="k">Total to usable</span><span class="v" id="total">—</span></div>
+    <div class="row"><span class="k">Airport idents loaded</span><span class="v" id="apn">—</span></div>
+    <div class="row"><span class="k">Navaid idents loaded</span><span class="v" id="nvn">—</span></div>
+    <div class="row"><span class="k">Sample lookup KDPA</span><span class="v" id="kdpa">—</span></div>
+    <div class="row"><span class="k">Sample lookup MYEB (Bahamas)</span><span class="v" id="myeb">—</span></div>
+    <div id="verdict"></div>
+  </div>
+
+  <div class="ua" id="ua"></div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+$('ua').textContent = 'UA: ' + navigator.userAgent;
+
+function fmtMs(ms){ return ms < 1000 ? Math.round(ms)+' ms' : (ms/1000).toFixed(2)+' s'; }
+function fmtMB(b){ return (b/1024/1024).toFixed(2)+' MB'; }
+
+(async function(){
+  try {
+    const t0 = performance.now();
+    const resp = await fetch('refdata.json', { cache: 'no-store' });
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const buf = await resp.arrayBuffer();          // full download
+    const tDl = performance.now();
+    const text = new TextDecoder().decode(buf);
+    const tP0 = performance.now();
+    const data = JSON.parse(text);                  // the expensive part
+    const tP1 = performance.now();
+
+    const xfer = resp.headers.get('content-length');
+    $('status').textContent = '✓ Loaded and parsed.';
+    $('results').style.display = 'block';
+    $('xfer').textContent = xfer ? fmtMB(+xfer)+' (gzip)' : '(unknown — server didn’t report)';
+    $('raw').textContent = fmtMB(buf.byteLength);
+    const dlMs = tDl - t0, parseMs = tP1 - tP0, totalMs = tP1 - t0;
+    $('dl').textContent = fmtMs(dlMs);
+    $('parse').textContent = fmtMs(parseMs);
+    $('total').textContent = fmtMs(totalMs);
+    $('apn').textContent = Object.keys(data.airports).length.toLocaleString();
+    $('nvn').textContent = Object.keys(data.navaids).length.toLocaleString();
+
+    const kdpa = data.airports['KDPA'];
+    $('kdpa').textContent = kdpa ? (kdpa[0]+' ('+kdpa[1]+', '+kdpa[2]+')') : 'NOT FOUND';
+    const myeb = data.airports['MYEB'];
+    $('myeb').textContent = myeb ? (myeb[0]+' ('+myeb[1]+', '+myeb[2]+')') : 'NOT FOUND';
+
+    // Verdict thresholds (rough): total-to-usable
+    const v = $('verdict');
+    let cls, msg;
+    if (totalMs < 1500) { cls='ok'; msg='VERDICT: Fast. Full-world bundle is comfortable on this device.'; }
+    else if (totalMs < 4000) { cls='warn'; msg='VERDICT: Acceptable. Noticeable but tolerable one-time load.'; }
+    else { cls='bad'; msg='VERDICT: Slow. Consider narrowing the bundle or lazy-loading.'; }
+    $('total').className = 'v ' + cls;
+    v.className = ''; v.style.color = cls==='ok'?'#7CFC9B':cls==='warn'?'#ffd166':'#ff7a59';
+    v.textContent = msg;
+  } catch (err) {
+    $('status').textContent = '✗ FAILED: ' + (err && err.message || err);
+    $('status').style.background = 'rgba(255,122,89,.18)';
+  }
+})();
+</script>
+</body>
+</html>
